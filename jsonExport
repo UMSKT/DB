@@ -1,0 +1,110 @@
+#!/usr/bin/env python
+import sqlite3
+import json
+
+
+def serialize_binary_data(data):
+    if isinstance(data, bytes):
+        return str(data)
+    elif isinstance(data, list):
+        return [serialize_binary_data(item) for item in data]
+    elif isinstance(data, dict):
+        return {key: serialize_binary_data(value) for key, value in data.items()}
+    return data
+
+
+def dump_sqlite_to_json(database_file, output_file):
+    connection = sqlite3.connect(database_file)
+    connection.row_factory = sqlite3.Row
+    cursor = connection.cursor()
+
+    tables = [
+        "BINK",
+        "DPCDLL",
+        "DPCDLL_ENTRIES",
+        "LICDLL",
+        "PIDGEN",
+        "BINK_PIDGEN",
+        "PRODUCT"
+    ]
+
+    data = {}
+    for table in tables:
+        cursor.execute(f"SELECT * FROM {table}")
+        rows = cursor.fetchall()
+
+        if table == "BINK_PIDGEN":
+            merged_data = {}
+            for row in rows:
+                pidgen_id = row["PIDGEN"]
+                bink = row["BINK"]
+
+                if pidgen_id in merged_data:
+                    merged_data[pidgen_id]["BINK"].append(bink)
+                else:
+                    merged_data[pidgen_id] = {}
+                    merged_data[pidgen_id]["BINK"] = [bink]
+
+            serialized_merged_data = serialize_binary_data(merged_data)
+            data[table] = serialized_merged_data
+        elif table == "PRODUCT":
+            product_data = {}
+            for row in rows:
+                shortname = row["shortname"]
+                product_data[shortname] = serialize_binary_data(dict(row))
+
+            data[table] = product_data
+        elif table == "LICDLL":
+            licdll_data = {}
+            for row in rows:
+                row_dict = dict(row)
+                id_value = row_dict.pop("ID", None)
+                licdll_data[id_value] = serialize_binary_data(row_dict)
+
+            data[table] = licdll_data
+        elif table == "DPCDLL_ENTRIES":
+            dpcll_entries_data = {}
+            for row in rows:
+                dpcll_id = row["DPCDLL_ID"]
+                bink_id = row["BINK_ID"]
+                entry_data = dict(row)
+                del entry_data["DPCDLL_ID"]
+                del entry_data["BINK_ID"]
+
+                if dpcll_id not in dpcll_entries_data:
+                    dpcll_entries_data[dpcll_id] = {}
+
+                dpcll_entries_data[dpcll_id][bink_id] = serialize_binary_data(entry_data)
+
+            data[table] = dpcll_entries_data
+        elif table == "DPCDLL":
+            dpcll_data = {}
+            for row in rows:
+                row_dict = dict(row)
+                id_value = row_dict.pop("ID", None)
+                dpcll_data[id_value] = serialize_binary_data(row_dict)
+
+            data[table] = dpcll_data
+        elif table == "BINK":
+            bink_data = {}
+            for row in rows:
+                row_dict = dict(row)
+                id_value = row_dict.pop("ID", None)
+                bink_data[id_value] = serialize_binary_data(row_dict)
+
+            data[table] = bink_data
+        else:
+            serialized_rows = [serialize_binary_data(dict(row)) for row in rows]
+            data[table] = serialized_rows
+
+    with open(output_file, 'w') as file:
+        json.dump(data, file, indent=4)
+
+    cursor.close()
+    connection.close()
+
+
+# Usage example
+database_file = "xpkgdb.sqlite"
+output_file = "xpkgdb.json"
+dump_sqlite_to_json(database_file, output_file)
